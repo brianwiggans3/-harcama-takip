@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#111827">
+<title>Harcama Takip</title>
+<style>
+:root{--bg:#f5f7fb;--card:#fff;--text:#111827;--muted:#6b7280;--accent:#111827;--line:#e5e7eb;--green:#0f9d58}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display",Arial,sans-serif}
+.app{max-width:720px;margin:auto;padding:18px 16px 90px}.top{display:flex;justify-content:space-between;align-items:center;margin:8px 0 20px}
+h1{font-size:28px;margin:0}.month{font-size:13px;color:var(--muted)}
+.total{background:#111827;color:white;border-radius:22px;padding:22px;margin-bottom:14px;box-shadow:0 10px 30px #11182722}
+.total small{opacity:.7}.amount{font-size:34px;font-weight:800;margin-top:4px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px}.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:16px}.card b{font-size:20px}.muted{color:var(--muted);font-size:13px}
+.actions{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:14px 0}.btn{border:0;border-radius:16px;padding:16px;font-size:16px;font-weight:700;cursor:pointer}.primary{background:#111827;color:white}.secondary{background:white;border:1px solid var(--line)}
+.section{font-size:18px;font-weight:800;margin:22px 2px 10px}.row{background:white;border:1px solid var(--line);border-radius:16px;padding:13px 14px;margin:8px 0;display:flex;justify-content:space-between;gap:12px}.row .name{font-weight:700}.row .sub{font-size:12px;color:var(--muted);margin-top:3px}.price{font-weight:800;white-space:nowrap}
+.bar{height:8px;background:#eef0f3;border-radius:20px;overflow:hidden;margin-top:8px}.fill{height:100%;background:#111827;border-radius:20px}
+dialog{border:0;border-radius:22px;width:min(92%,520px);padding:0;box-shadow:0 25px 80px #0004}.modal{padding:20px}.modal h2{margin:0 0 14px}.close{float:right;border:0;background:#eee;border-radius:50%;width:34px;height:34px}
+input,select{width:100%;padding:13px;border:1px solid var(--line);border-radius:12px;font-size:16px;margin:6px 0 12px}label{font-size:13px;font-weight:700}.formbtn{width:100%;padding:14px;border:0;border-radius:13px;background:#111827;color:#fff;font-size:16px;font-weight:700}
+#scanStatus{font-size:13px;color:var(--muted);margin:8px 0}.preview{width:100%;border-radius:14px;max-height:280px;object-fit:contain;background:#f1f3f5;display:none}
+.empty{text-align:center;color:var(--muted);padding:28px 10px}.danger{color:#b42318;background:none;border:0}
+footer{text-align:center;color:#9ca3af;font-size:11px;margin-top:30px}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="top"><div><h1>Harcama Takip</h1><div class="month" id="monthLabel"></div></div><button class="btn secondary" onclick="openManual()">＋ Ekle</button></div>
+  <div class="total"><small>Bu ay toplam harcama</small><div class="amount" id="total">₺0,00</div></div>
+  <div class="grid">
+    <div class="card"><div class="muted">İşlem sayısı</div><b id="count">0</b></div>
+    <div class="card"><div class="muted">Günlük ortalama</div><b id="daily">₺0</b></div>
+  </div>
+  <div class="actions">
+    <button class="btn primary" onclick="document.getElementById('receipt').click()">📸 Fiş Tara</button>
+    <button class="btn secondary" onclick="openManual()">✍️ Elle Gir</button>
+  </div>
+  <input id="receipt" type="file" accept="image/*" capture="environment" hidden onchange="scanReceipt(event)">
+  <div id="scanStatus"></div>
+  <img id="preview" class="preview">
+  <div class="section">Kategoriler</div>
+  <div id="cats"></div>
+  <div class="section">Son harcamalar</div>
+  <div id="list"></div>
+  <footer>Veriler bu cihazdaki tarayıcıda saklanır.</footer>
+</div>
+
+<dialog id="dlg"><div class="modal">
+<button class="close" onclick="dlg.close()">×</button>
+<h2>Harcama ekle</h2>
+<label>Açıklama</label><input id="name" placeholder="Örn. Migros alışverişi">
+<label>Tutar (TL)</label><input id="price" type="number" step="0.01" placeholder="0">
+<label>Kategori</label>
+<select id="cat"><option>Market</option><option>Yemek</option><option>Ulaşım</option><option>Giyim</option><option>Elektronik</option><option>Fatura</option><option>Ev</option><option>Sağlık</option><option>Eğlence</option><option>Diğer</option></select>
+<label>Tarih</label><input id="date" type="date">
+<button class="formbtn" onclick="saveManual()">Kaydet</button>
+</div></dialog>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script>
+const KEY='harcama_takip_v1';
+let items=JSON.parse(localStorage.getItem(KEY)||'[]');
+const cats=['Market','Yemek','Ulaşım','Giyim','Elektronik','Fatura','Ev','Sağlık','Eğlence','Diğer'];
+const money=n=>new Intl.NumberFormat('tr-TR',{style:'currency',currency:'TRY'}).format(n);
+const save=()=>localStorage.setItem(KEY,JSON.stringify(items));
+const esc=s=>String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));
+function monthItems(){let d=new Date();return items.filter(x=>{let a=new Date(x.date);return a.getMonth()==d.getMonth()&&a.getFullYear()==d.getFullYear()})}
+function render(){
+ let mi=monthItems(), total=mi.reduce((s,x)=>s+x.price,0);
+ document.getElementById('monthLabel').textContent=new Date().toLocaleDateString('tr-TR',{month:'long',year:'numeric'});
+ document.getElementById('total').textContent=money(total);
+ document.getElementById('count').textContent=mi.length;
+ document.getElementById('daily').textContent=money(total/Math.max(1,new Date().getDate()));
+ let sums={};mi.forEach(x=>sums[x.cat]=(sums[x.cat]||0)+x.price);
+ let max=Math.max(1,...Object.values(sums));
+ document.getElementById('cats').innerHTML=Object.entries(sums).sort((a,b)=>b[1]-a[1]).map(([c,v])=>`<div class="card" style="margin:8px 0"><div style="display:flex;justify-content:space-between"><b style="font-size:15px">${esc(c)}</b><b style="font-size:15px">${money(v)}</b></div><div class="bar"><div class="fill" style="width:${v/max*100}%"></div></div></div>`).join('')||'<div class="empty">Henüz harcama yok.</div>';
+ document.getElementById('list').innerHTML=mi.sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,30).map(x=>`<div class="row"><div><div class="name">${esc(x.name)}</div><div class="sub">${esc(x.cat)} · ${new Date(x.date).toLocaleDateString('tr-TR')}</div></div><div><div class="price">${money(x.price)}</div><button class="danger" onclick="removeItem('${x.id}')">Sil</button></div></div>`).join('')||'<div class="empty">Fiş tara veya ilk harcamanı ekle.</div>';
+}
+function openManual(){
+ document.getElementById('name').value='';document.getElementById('price').value='';
+ document.getElementById('date').value=new Date().toISOString().slice(0,10);
+ dlg.showModal();
+}
+function saveManual(){
+ let name=document.getElementById('name').value.trim(), price=parseFloat(document.getElementById('price').value);
+ if(!name||!price)return alert('Açıklama ve tutar gerekli.');
+ items.push({id:crypto.randomUUID(),name,price,cat:document.getElementById('cat').value,date:document.getElementById('date').value});
+ save();dlg.close();render();
+}
+function removeItem(id){items=items.filter(x=>x.id!==id);save();render()}
+function guessCat(text){
+ text=text.toLowerCase();
+ if(/migros|bim|a101|şok|carrefour|market|gıda/.test(text))return 'Market';
+ if(/restaurant|restoran|cafe|kafe|burger|pizza|yemek|döner/.test(text))return 'Yemek';
+ if(/opet|shell|petrol|benzin|motorin|otopark|taksi/.test(text))return 'Ulaşım';
+ if(/lc waikiki|koton|zara|defacto|kiğılı|altınyıldız|giyim/.test(text))return 'Giyim';
+ if(/teknosa|mediamarkt|vatan|apple|samsung|elektronik/.test(text))return 'Elektronik';
+ return 'Diğer';
+}
+function parseTotal(text){
+ let lines=text.split(/\n/).map(s=>s.trim()).filter(Boolean);
+ let keys=/(genel toplam|toplam|ödenecek|tutar|total|amount)/i;
+ for(let l of lines){
+   if(keys.test(l)){let ms=l.match(/(\d{1,6}(?:[.,]\d{2})?)\s*(?:tl|₺)?/ig); if(ms?.length){let s=ms[ms.length-1].replace(/tl|₺/ig,'').replace(/\./g,'').replace(',','.');let n=parseFloat(s);if(n>0)return n}}
+ }
+ let nums=[...text.matchAll(/(\d{1,6}[.,]\d{2})\s*(?:tl|₺)?/ig)].map(m=>parseFloat(m[1].replace(/\./g,'').replace(',','.'))).filter(n=>n>0&&n<100000);
+ return nums.length?Math.max(...nums):0;
+}
+async function scanReceipt(e){
+ let file=e.target.files[0];if(!file)return;
+ const img=document.getElementById('preview');img.src=URL.createObjectURL(file);img.style.display='block';
+ const st=document.getElementById('scanStatus');st.textContent='Fiş okunuyor… ilk kullanımda OCR motoru indirilebilir.';
+ try{
+  const result=await Tesseract.recognize(file,'tur+eng',{logger:m=>{if(m.status==='recognizing text')st.textContent='Fiş okunuyor… '+Math.round(m.progress*100)+'%';}});
+  let text=result.data.text, total=parseTotal(text), cat=guessCat(text);
+  let merchant=(text.split(/\n/).map(s=>s.trim()).find(s=>s.length>2&&!/\d{2,}/.test(s))||'Fiş harcaması').slice(0,60);
+  if(!total){st.textContent='Fiş okundu ama toplam bulunamadı. Elle girebilirsin.';document.getElementById('name').value=merchant;openManual();return}
+  items.push({id:crypto.randomUUID(),name:merchant,price:total,cat,date:new Date().toISOString().slice(0,10),receiptText:text});
+  save();render();st.textContent=`Kaydedildi: ${merchant} — ${money(total)}`;
+ }catch(err){st.textContent='Fiş okunamadı. Fotoğrafı daha net çekip tekrar dene.';console.error(err)}
+ e.target.value='';
+}
+render();
+</script>
+</body></html>
